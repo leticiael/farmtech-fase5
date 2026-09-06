@@ -26,7 +26,7 @@ próprio vídeo de apresentação, referenciado nas seções abaixo.
 
 📓 **Notebook:** [`LeticiaEltermann_rm568645_pbl_fase4.ipynb`](LeticiaEltermann_rm568645_pbl_fase4.ipynb)
 
-🎥 **Vídeo de apresentação:** [INSERIR LINK]
+🎥 **Vídeo de apresentação:** https://www.youtube.com/watch?v=1yPK3VSU7Pg
 
 ### O que o trabalho descobriu
 
@@ -162,7 +162,7 @@ custo de uma API de campo que responde devagar. A conta muda se a carga crescer 
 como a diferença é percentual e não fixa, uma infraestrutura dez vezes maior tornaria a
 economia de 870 USD anuais um argumento a ser reavaliado.
 
-🎥 **Vídeo de apresentação:** [INSERIR LINK]
+🎥 **Vídeo de apresentação:** https://www.youtube.com/watch?v=nYzUWreKDQM
 
 ---
 
