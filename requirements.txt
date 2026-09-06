@@ -1,0 +1,12 @@
+# Dependencias importadas pelo notebook, nas versoes em que ele foi validado.
+matplotlib==3.9.3
+numpy==2.1.3
+pandas==2.2.3
+scikit-learn==1.5.2
+scipy==1.18.0
+seaborn==0.13.2
+
+# Ambiente para abrir e executar o .ipynb.
+ipykernel==6.29.5
+jupyter==1.1.1
+notebook==7.6.0
