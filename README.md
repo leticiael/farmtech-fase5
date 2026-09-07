@@ -193,6 +193,213 @@ ser reavaliado.
 
 ---
 
+## Ir Além — Classificação de saúde da plantação com ML e ESP32
+
+Um nó ESP32 publica telemetria por MQTT; um assinante Python classifica cada
+leitura como **Saudável** ou **Não saudável** e persiste o resultado.
+
+🎥 **Vídeo de apresentação:** https://www.youtube.com/watch?v=OQc2-ghvqIQ
+
+### Por que arroz, e por que estes dois sensores
+
+**A cultura é arroz**, a mesma da Entrega 1, para que as duas partes conversem.
+Foi no arroz que apareceu a correlação bruta mais forte de todo o conjunto —
+umidade específica, 0,697 — e foi ela que desabou para −0,141 ao controlar a
+tendência. É a cultura onde a pergunta "o clima explica o rendimento?" ficou
+mais viva.
+
+**O DHT22 fornece temperatura e umidade relativa do ar.** São duas das quatro
+variáveis climáticas do `crop_yield.csv`, agora publicadas pelo nó em vez de
+lidas de um arquivo. No Wokwi esses valores são atributos do componente,
+digitados no canvas — não há medição.
+
+**O potenciômetro representa umidade de solo** — e essa é a escolha que
+importa. A Entrega 1 termina dizendo que o conjunto **não tem nenhuma variável
+de solo nem de manejo**, e que isso limita o que se pode afirmar. O Ir Além
+ataca exatamente essa lacuna: acrescenta o eixo que faltava. O que ele não faz
+é fechá-la, pelo motivo declarado abaixo.
+
+### Arquitetura
+
+```mermaid
+flowchart LR
+    subgraph sim["Simulador Wokwi — leituras simuladas"]
+        DHT["DHT22<br/>temperatura + umidade do ar"] -->|GPIO27| ESP["ESP32<br/>devkit-c-v4"]
+        POT["Potenciômetro<br/>umidade de solo"] -->|GPIO34| ESP
+    end
+    ESP -->|"JSON via MQTT<br/>rede real"| BROKER["broker.hivemq.com:1883<br/>tópico fiap/farmtech/rice/+/telemetry"]
+    BROKER --> SUB["assinante_mqtt.py<br/>valida schema e sanidade"]
+    SUB --> MODELO["classificador_saude_arroz.joblib<br/>carregado uma vez"]
+    MODELO --> SUB
+    SUB --> DB[("SQLite<br/>dados/telemetria.db")]
+    SUB --> CON["Console<br/>Saudável / Não saudável"]
+    TREINO["treinar_classificador.py"] -.->|gera| MODELO
+```
+
+![Simulação do nó ESP32 no Wokwi](assets/prints/wokwi.png)
+*O nó rodando no Wokwi: potenciômetro, ESP32 e DHT22 ligados, e o Serial Monitor
+publicando o JSON a cada 5 s — `ts` avança de 1788740791 para 1788740796 e
+seguintes, de cinco em cinco. O painel **"Editing DHT22"** no topo, com as
+barras de Temperature em 26,5 °C e Humidity em 72,0 %, é a evidência direta da
+limitação declarada mais abaixo: as leituras são **ajustadas no canvas**, não
+medidas.*
+
+### O classificador, e por que a acurácia dele não significa o que parece
+
+A telemetria **não traz rótulo de saúde**. O rótulo é gerado por uma regra de
+limiares escrita por mim em `treinar_classificador.py`. Treinar um modelo nesse
+rótulo faz o modelo **reaprender a minha própria regra**.
+
+É o mesmo erro que a Entrega 1 evita ao julgar todo R² contra o piso de
+média-por-cultura — com um agravante: lá o piso era alto por uma propriedade do
+dado; aqui o teto é 1,0 por construção, e nenhum dado do mundo pode contrariar
+o rótulo. **A acurácia mede o quanto o modelo aproxima uma função que eu já
+conheço, não a saúde da lavoura.**
+
+Por isso três modelos, escolhidos pela geometria da regra e não por acaso:
+
+| Modelo | Acurácia | Precisão | Recall |
+|---|---:|---:|---:|
+| Piso — classe majoritária | 0,5910 | 0,0000 | 0,0000 |
+| Regressão Logística | 0,8740 | 0,8529 | 0,8362 |
+| **Árvore de Decisão** (serializada) | **0,9990** | **1,0000** | **0,9976** |
+
+A regra é um **"E" de dois limiares**, ambos paralelos aos eixos: temperatura
+abaixo do teto **e** solo acima do mínimo. A árvore particiona exatamente nessa
+forma e chega perto de reproduzir o rótulo; a logística traça **uma** reta, que
+só aproxima o canto formado pelos dois limiares — daí os 0,8740.
+
+Essa diferença entre os dois descreve **a forma da minha regra de rotulagem**.
+Não descreve o arroz. Ler o 0,9990 da árvore como "o sistema detecta estresse"
+seria a conclusão errada que este projeto inteiro existe para evitar.
+
+**E nem mesmo a árvore é idêntica à regra.** Contra 2 milhões de amostras novas
+dentro da janela declarada, ela concorda com a regra em **0,999725** dos casos:
+aprendeu cortes estreitos em torno dos limiares que a regra não tem. O script
+mede e imprime esse número justamente para que a matriz de confusão quase
+perfeita não sugira uma identidade que não existe.
+
+A importância por permutação confirma por outro caminho: a umidade do ar pesa
+**0,0000**, contra 0,3282 do solo e 0,2640 da temperatura. Não é achado
+empírico — é consequência de construção, porque a umidade do ar **não entra na
+regra de rotulagem**, pelo motivo da seção seguinte.
+
+### As faixas usadas, e a que não existe
+
+| Constante | Valor | Origem |
+|---|---:|---|
+| Temperatura, máxima | 33 °C | fonte verificada, que contém o número |
+| Umidade de solo, mínima | 40 % | **sem lastro agronômico — ponto de operação** |
+| Temperatura, mínima | — | **removida**, ver abaixo |
+
+O limiar de 33 °C vem de [*Temperature thresholds for spikelet sterility*,
+Agricultural and Forest Meteorology
+(2016)](https://www.sciencedirect.com/science/article/abs/pii/S0168192316301587),
+que reporta 0,26 ponto percentual de esterilidade de espiguetas por grau-hora
+acima desse valor. [Jagadish et al. (2007), *Journal of Experimental
+Botany*](https://academic.oup.com/jxb/article/58/7/1627/512931) corrobora — até
+1 h de exposição a ≥ 33,7 °C na antese já causa esterilidade — **com ressalva de
+genótipo**: ali o limiar de 33 °C é do Azucena, e no mesmo estudo o IR64 perde
+fertilidade acima de 29,6 °C sem limiar definido. Ou seja, 33 °C não é o valor
+mais restritivo da literatura; é o que a fonte sustenta.
+
+**A temperatura mínima foi removida da regra.** Uma versão anterior usava 25 °C,
+apoiada na faixa "ótima 25–35 °C" comum na literatura secundária. Fui conferir:
+**nenhuma das duas fontes acima contém essa faixa** — ela rastreia a Yoshida
+(1981), *Fundamentals of Rice Crop Science*, IRRI, cujo texto integral eu não
+consegui acessar para verificar o valor. Citar as fontes que eu tenho para
+sustentar um número que elas não trazem seria fonte decorativa, exatamente o
+defeito que este projeto se propõe a não cometer. Preferi remover o limiar a
+mantê-lo sem lastro: o dano por frio é real em arroz, mas está **fora do escopo
+declarado** deste classificador.
+
+**A terceira não é uma faixa agronômica, e não vou apresentá-la como se fosse.**
+A referência de manejo de água para arroz é o *Safe AWD* do
+[IRRI](http://www.knowledgebank.irri.org/training/fact-sheets/water-management/saving-water-alternate-wetting-drying-awd):
+reirrigar quando a lâmina d'água baixa a **15 cm abaixo da superfície**. Isso
+está em **profundidade de lâmina d'água**. Converter 15 cm em porcentagem de
+leitura de sensor capacitivo exige calibração por tipo de solo, que este projeto
+não tem. Transportar o número de uma grandeza para a outra seria fabricar uma
+faixa com aparência de fonte. O valor de 40 % é escolha minha, declarada.
+
+**E a umidade do ar não tem limiar nenhum.** Não encontrei fonte que separasse
+arroz saudável de arroz sob estresse por umidade relativa. Ela entra como
+feature — é o que o sensor publica — mas fica fora da regra. Daí a importância
+zero medida acima.
+
+### Como rodar
+
+```bash
+pip install -r ir-alem/requirements.txt
+
+# 1. treina e grava ir-alem/modelo/classificador_saude_arroz.joblib
+python ir-alem/python/treinar_classificador.py
+
+# 2. suba o firmware no Wokwi — passo a passo em ir-alem/firmware/explicacao.md
+
+# 3. com a simulação rodando, assine e classifique
+python ir-alem/python/assinante_mqtt.py
+
+# opcional, recomendado: aceitar só o seu nó. O ID sai da primeira linha
+# do Serial Monitor do Wokwi.
+python ir-alem/python/assinante_mqtt.py --device 100100C40A24
+```
+
+O assinante imprime uma linha por amostra e grava em `ir-alem/dados/telemetria.db`:
+
+```
+[2026-09-07 12:00:00] 100100C40A24  T= 26.5C  UR= 72.0%  Solo= 50.1%  ->  Saudável
+```
+
+### Limitações
+
+**Não há ESP32 físico.** O hardware é o simulador Wokwi, e a distinção é
+específica:
+
+| É real | É simulado |
+|---|---|
+| o Wi-Fi e o MQTT saem para a internet | as leituras dos dois sensores |
+| o broker `broker.hivemq.com` | a placa ESP32 e os componentes |
+| o modelo, a classificação e o banco | |
+
+**O potenciômetro não é um sensor de solo.** É um cursor cuja posição o firmware
+converte linearmente em 0–100 %. Não mede umidade, e chamar o número de "umidade
+de solo medida" seria falso.
+
+**O broker é público.** Qualquer pessoa pode publicar no tópico, e o assinante
+usa wildcard. Todo payload passa por validação de schema, de cultura e de
+sanidade, e o `device` do corpo tem que bater com o nível curinga do tópico —
+mas **nada disso é autenticação**. Contra publicação de terceiro, a defesa real
+é a allowlist do `--device`; sem ela, o assinante aceita qualquer publicação do
+tópico.
+
+**A entrega é QoS 0.** Sem confirmação e sem retransmissão: mensagem perdida
+some sem aviso, e reconexão pode reentregar. O banco tem índice único que
+descarta a duplicata exata — mas só onde o `ts` já sincronizou, porque nos
+primeiros ~30 s ele vale 0 para todas as amostras e uma chave cega ali
+descartaria leitura legítima. Nenhuma contagem de amostras deve ser tratada
+como censo.
+
+**As amostras de treino são sintéticas.** Geradas numa janela que eu escolhi
+para atravessar os limiares, não numa distribuição de campo. A proporção de
+0,409 da classe "saudável" é consequência dessa janela.
+
+**O que mudaria numa montagem física:**
+
+- **Pinagem.** GPIO34 é entrada apenas e pertence ao ADC1, o único que funciona
+  com o rádio Wi-Fi ligado — em placa real essa escolha deixa de ser detalhe e
+  vira requisito. O firmware fixa a resolução do ADC mas não configura a
+  atenuação, e no silício a curva de leitura depende dela.
+- **Calibração do capacitivo.** Um sensor real exige levantar os dois extremos
+  no solo da lavoura — seco e saturado — e ainda assim a leitura varia com
+  textura, salinidade e temperatura. Só depois disso um limiar em porcentagem
+  passaria a ter significado agronômico.
+- **Ruído.** Nada aqui trata deriva térmica, oxidação de trilha, cabo longo ou
+  queda de tensão. O oversampling de 8 leituras do firmware derruba jitter de
+  quantização, não interferência real.
+
+---
+
 ## Estrutura do repositório
 
 ```
@@ -202,7 +409,8 @@ farmtech-fase5/
 ├── requirements.txt                            dependências, nas versões validadas
 ├── README.md                                   este arquivo
 ├── assets/
-│   └── prints/                                 evidências da cotação AWS (Entrega 2)
+│   └── prints/                                 evidências das cotações AWS e da simulação
+│       ├── wokwi.png
 │       ├── aws-sp-config.png
 │       ├── aws-sp-instancia.png
 │       ├── aws-sp-ebs.png
@@ -210,5 +418,15 @@ farmtech-fase5/
 │       ├── aws-va-instancia.png
 │       ├── aws-va-ebs.png
 │       └── aws-comparativo.png
-└── ir-alem/                                    material complementar
+└── ir-alem/                                    Ir Além — classificação de saúde da plantação
+    ├── firmware/                               o que roda no ESP32 simulado, e como subir no Wokwi
+    │   ├── sketch.ino
+    │   ├── diagram.json
+    │   └── explicacao.md
+    ├── python/                                 treino do classificador e assinante MQTT
+    │   ├── treinar_classificador.py
+    │   └── assinante_mqtt.py
+    ├── modelo/                                 artefato .joblib gerado pelo treino
+    ├── dados/                                  SQLite gerado pelo assinante em execução
+    └── requirements.txt                        dependências só do Ir Além
 ```

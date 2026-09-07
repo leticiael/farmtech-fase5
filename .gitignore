@@ -6,4 +6,10 @@ ir-alem/firmware/config.h
 .claude/
 CLAUDE.md
 roteiro-video1.md
+roteiro-video3.md
 LeticiaEltermann_rm568645_pbl_fase4.html
+
+# Gerados em execucao pelos scripts do ir-alem; os scripts que os produzem
+# estao versionados, os artefatos nao.
+ir-alem/modelo/*.joblib
+ir-alem/dados/*.db
