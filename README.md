@@ -33,7 +33,7 @@ entrega tem seu próprio vídeo de apresentação, referenciado nas seções aba
 
 📓 **Notebook:** [`LeticiaEltermann_rm568645_pbl_fase4.ipynb`](LeticiaEltermann_rm568645_pbl_fase4.ipynb)
 
-🎥 **Vídeo de apresentação:** https://www.youtube.com/watch?v=1yPK3VSU7Pg
+🎥 **Vídeo de apresentação:** https://www.youtube.com/watch?v=DWn6432vQO4
 
 ### O que o trabalho descobriu
 
